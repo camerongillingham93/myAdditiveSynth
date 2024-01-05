@@ -12,6 +12,7 @@ const int numHarmonics = 5;
 //objects 
 static DaisySeed              hw;
 static HarmonicOscillator<numHarmonics> harm;
+MidiUsbHandler midi;
 Encoder encoders[5];
 //globals
 float amplitudes[numHarmonics];
@@ -19,11 +20,13 @@ float encoderValues[numHarmonics];
 //function protos
 void handleEncoders();
 void SetAmplitudeValues();
+void midiHandler();
 
 static void AudioCallback(AudioHandle::InterleavingInputBuffer  in,
                           AudioHandle::InterleavingOutputBuffer out,
                           size_t                                size)
 {
+    midiHandler();
     handleEncoders();
     SetAmplitudeValues();
     harm.SetAmplitudes(amplitudes);
@@ -43,10 +46,15 @@ int main(void)
     hw.SetAudioBlockSize(4);
     sample_rate = hw.AudioSampleRate();
 
+    //Initialize USB midi
+    MidiUsbHandler::Config midi_cfg;
+    midi_cfg.transport_config.periph = MidiUsbTransport::Config::INTERNAL;
+    midi.Init(midi_cfg);
+
     //init harmonic oscillator
     harm.Init(sample_rate);
     harm.SetFirstHarmIdx(1);
-    harm.SetFreq(440.0f);
+    //harm.SetFreq(440.0f);
 
     // initialize encoders 
     encoders[0].Init(hw.GetPin(19), hw.GetPin(20), hw.GetPin(27));
@@ -114,5 +122,45 @@ void SetAmplitudeValues()
         for (int i = 0; i < numHarmonics; i++)
         {
             amplitudes[i] = encoderValues[i];
+        }
+    }
+
+void midiHandler()
+    {
+        /** Listen to MIDI for new changes */
+        midi.Listen();
+
+        /** When there are messages waiting in the queue... */
+        while(midi.HasEvents())
+        {
+            /** Pull the oldest one from the list... */
+            auto msg = midi.PopEvent();
+            switch(msg.type)
+            {
+                case NoteOn:
+                {
+                    /** and change the frequency of the oscillator */
+                    auto note_msg = msg.AsNoteOn();
+                    if(note_msg.velocity != 0)
+                    {
+                        // Map the velocity to a suitable amplitude range (e.g., 0.0 to 1.0)
+                        // float amplitude
+                        //     = static_cast<float>(note_msg.velocity) / 127.0f;
+
+                        harm.SetFreq(mtof(note_msg.note));
+                        //harm.SetAmp(amplitude);
+                    }
+                }
+                break;
+                case NoteOff:
+                {
+                    /** Handle Note Off message */
+                    auto note_msg = msg.AsNoteOff();
+                    harm.SetFreq(0.0f);
+                }
+                    // Since we only care about note-on messages in this example
+                    // we'll ignore all other message types
+                default: break;
+            }
         }
     }
